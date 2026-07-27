@@ -95,6 +95,7 @@ class Config:
     """应用配置"""
 
     ENV_PUSH_KEY = "PUSHDEER_SENDKEY"
+    ENV_PUSHPLUS_TOKEN = "PUSHPLUS_TOKEN"
     ENV_COOKIES = "GLADOS_COOKIES"
     ENV_EXCHANGE_PLAN = "GLADOS_EXCHANGE_PLAN"
     ENV_VERBOSE = "GLADOS_VERBOSE"
@@ -117,6 +118,7 @@ class Config:
 
     def __init__(self):
         self.push_key: str = ""
+        self.pushplus_token: str = ""
         self.cookies_list: List[str] = []
         self.exchange_plan: str = self.DEFAULT_EXCHANGE_PLAN
         self.verbose: bool = self.DEFAULT_VERBOSE
@@ -125,6 +127,7 @@ class Config:
     def _load_config(self) -> None:
         """加载配置"""
         push_key_env: Optional[str] = os.environ.get(self.ENV_PUSH_KEY)
+        pushplus_token_env: Optional[str] = os.environ.get(self.ENV_PUSHPLUS_TOKEN)
         raw_cookies_env: Optional[str] = os.environ.get(self.ENV_COOKIES)
         exchange_plan_env: Optional[str] = os.environ.get(self.ENV_EXCHANGE_PLAN)
         verbose_env: Optional[str] = os.environ.get(self.ENV_VERBOSE)
@@ -134,6 +137,8 @@ class Config:
             self.push_key = ""
         else:
             self.push_key = push_key_env
+
+        self.pushplus_token = pushplus_token_env or ""
 
         if not raw_cookies_env:
             logger.warning(f"{LogEmoji.WARNING} 环境变量 '{self.ENV_COOKIES}' 未设置。")
@@ -156,6 +161,7 @@ class Config:
 
         logger.info(f"{LogEmoji.INFO} 共加载了 {len(self.cookies_list)} 个 Cookie 用于签到。")
         logger.info(f"{LogEmoji.INFO} 当前 {self.ENV_PUSH_KEY} {'已设置' if push_key_env else '未设置'}。")
+        logger.info(f"{LogEmoji.INFO} 当前 {self.ENV_PUSHPLUS_TOKEN} {'已设置' if pushplus_token_env else '未设置'}。")
         logger.info(f"{LogEmoji.INFO} 当前 {self.ENV_EXCHANGE_PLAN}: {self.exchange_plan}。")
 
         if verbose_env is not None:
@@ -393,23 +399,64 @@ class CheckinResult:
 class PushService:
     """推送服务"""
 
+    PUSHPLUS_URL = "https://www.pushplus.plus/send"
+
     def __init__(self, config: Config):
         self.config = config
 
     def send(self, title: str, content: str) -> bool:
-        """发送推送"""
-        if not self.config.push_key:
+        """发送已配置的推送通道。"""
+        push_results = []
+
+        if self.config.push_key:
+            push_results.append(self._send_pushdeer(title, content))
+        if self.config.pushplus_token:
+            push_results.append(self._send_pushplus(title, content))
+
+        if not push_results:
             logger.info(f"{LogEmoji.WARNING} 未设置推送密钥，跳过推送通知。")
             return False
+        return any(push_results)
 
+    def _send_pushdeer(self, title: str, content: str) -> bool:
+        """通过 PushDeer 发送推送。"""
         try:
             pushdeer = PushDeer(pushkey=self.config.push_key)
             pushdeer.send_text(title, desp=content)
-            logger.info(f"{LogEmoji.SUCCESS} 推送通知发送成功。")
+            logger.info(f"{LogEmoji.SUCCESS} PushDeer 推送通知发送成功。")
             return True
         except Exception as e:
-            logger.error(f"{LogEmoji.ERROR} 发送推送通知失败: {e}")
+            logger.error(f"{LogEmoji.ERROR} PushDeer 推送通知失败: {e}")
             return False
+
+    def _send_pushplus(self, title: str, content: str) -> bool:
+        """通过 PushPlus 发送微信推送。"""
+        try:
+            response = requests.post(
+                self.PUSHPLUS_URL,
+                json={
+                    "token": self.config.pushplus_token,
+                    "title": title,
+                    "content": content,
+                    "template": "txt",
+                },
+                timeout=10,
+            )
+            response_data = response.json() if response.content else {}
+            if response.ok and response_data.get("code") == 200:
+                logger.info(f"{LogEmoji.SUCCESS} PushPlus 微信推送发送成功。")
+                return True
+
+            logger.error(
+                f"{LogEmoji.ERROR} PushPlus 微信推送失败: "
+                f"HTTP {response.status_code}, {response.text}"
+            )
+        except (requests.RequestException, ValueError) as e:
+            logger.error(f"{LogEmoji.ERROR} PushPlus 微信推送失败: {e}")
+        except Exception as e:
+            logger.error(f"{LogEmoji.ERROR} PushPlus 微信推送发生未预期错误: {e}")
+            return False
+        return False
 
 
 class Checker:
