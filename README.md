@@ -44,6 +44,8 @@
 
 - 添加1个`repository secret`，命名为`PUSHDEER_SENDKEY`，其值对应 PushDeer key: ([获取地址](https://www.pushdeer.com/product.html))。
 
+- PushPlus 微信推送（可选）：关注 PushPlus 微信公众号并在个人中心获取 token，然后添加 `repository secret`，命名为 `PUSHPLUS_TOKEN`。设置后每次签到会发送结果到微信；可与 `PUSHDEER_SENDKEY` 同时使用。
+
 ### **star**自己的仓库
 
 ![图片加载失败](imgs/4.png)
