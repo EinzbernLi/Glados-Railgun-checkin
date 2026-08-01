@@ -7,6 +7,10 @@ from zoneinfo import ZoneInfo
 
 
 BEIJING_TIMEZONE = ZoneInfo("Asia/Shanghai")
+SERVICE_NAMES = {
+    "glados.cloud": "GLaDOS",
+    "railgun.info": "Railgun",
+}
 
 
 def beijing_now() -> datetime:
@@ -80,10 +84,19 @@ class NotificationModel:
     @classmethod
     def from_results(cls, results: list[CheckinResult]) -> "NotificationModel":
         accounts = len({result.account_index for result in results})
+        domains = tuple(dict.fromkeys(result.domain for result in results))
         failures = sum(result.failed for result in results)
+        single_service = (
+            SERVICE_NAMES.get(domains[0], domains[0]) if len(domains) == 1 else None
+        )
         if failures:
+            title = (
+                f"{single_service} 签到结果异常｜{failures} 项需要处理"
+                if single_service
+                else f"签到汇总异常｜{failures} 项需要处理"
+            )
             return cls(
-                title=f"签到汇总异常｜{failures} 项需要处理",
+                title=title,
                 summary=f"{accounts} 个签到目标 · {failures} 项异常",
                 severity="error",
                 results=results,
@@ -91,9 +104,12 @@ class NotificationModel:
         if accounts == 1:
             days = next((r.days for r in results if r.days is not None), None)
             suffix = f"剩余 {days} 天" if days is not None else "0 异常"
-            title = f"签到汇总完成｜1 个签到目标 · {suffix}"
         else:
-            title = f"签到汇总完成｜{accounts} 个签到目标 · 0 异常"
+            suffix = f"{accounts} 个签到目标 · 0 异常"
+        if single_service:
+            title = f"{single_service} 签到结果｜{suffix}"
+        else:
+            title = f"签到汇总完成｜{suffix}"
         return cls(
             title=title,
             summary=f"{accounts} 个签到目标 · 0 项异常",

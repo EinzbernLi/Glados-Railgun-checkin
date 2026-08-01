@@ -31,7 +31,8 @@ def model_with(state=CheckinState.ALREADY):
 
 def test_today_already_checked_is_rendered_as_normal():
     model = model_with()
-    assert "签到汇总完成" in model.title
+    assert model.title.startswith("GLaDOS 签到结果")
+    assert "签到汇总" not in model.title
     assert "今日已签到" in TextRenderer().render(model).body
     assert "异常" not in model.title
 
@@ -93,6 +94,7 @@ def test_multiple_domains_share_one_notification_model():
         )
     )
     model = NotificationModel.from_results(model.results)
+    assert model.title.startswith("签到汇总完成")
     pushplus = PushPlusRenderer().render(model).body
     pushdeer = MarkdownRenderer().render(model).body
     telegram = TelegramRenderer().render(model)
@@ -101,6 +103,34 @@ def test_multiple_domains_share_one_notification_model():
     assert len(telegram) == 1
     assert "glados.cloud" in telegram[0].body
     assert "railgun.info" in telegram[0].body
+
+
+def test_single_railgun_domain_with_multiple_accounts_uses_service_title():
+    results = [
+        CheckinResult(
+            account_index=index,
+            domain="railgun.info",
+            checkin_state=CheckinState.ALREADY,
+        )
+        for index in (1, 2)
+    ]
+    model = NotificationModel.from_results(results)
+    assert model.title == "Railgun 签到结果｜2 个签到目标 · 0 异常"
+
+
+def test_single_custom_domain_uses_domain_title():
+    result = CheckinResult(
+        account_index=1,
+        domain="check.example.com",
+        checkin_state=CheckinState.ALREADY,
+    )
+    model = NotificationModel.from_results([result])
+    assert model.title.startswith("check.example.com 签到结果｜")
+
+
+def test_single_glados_failure_uses_service_error_title():
+    model = model_with(CheckinState.AUTH_ERROR)
+    assert model.title == "GLaDOS 签到结果异常｜1 项需要处理"
 
 
 def test_aggregated_notification_shows_each_domain_actual_policy():

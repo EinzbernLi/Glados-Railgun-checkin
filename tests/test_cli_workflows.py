@@ -227,4 +227,7 @@ def test_readme_documents_domain_binding_aggregation_and_beijing_time():
     assert '"enable_exchange":false' in text
     assert "一张 HTML 卡片" in text
     assert "一张 Markdown 卡片" in text
+    assert "GLaDOS 签到结果" in text
+    assert "Railgun 签到结果" in text
+    assert "两个及以上域名" in text
     assert "北京时间" in text
