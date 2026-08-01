@@ -23,9 +23,10 @@ class Checker:
 
     def run(self) -> list[CheckinResult]:
         results = []
-        for account_index, cookie in enumerate(self.config.cookies, 1):
-            for domain in self.config.domains:
-                results.append(self._run_one(account_index, cookie, domain))
+        for account_index, target in enumerate(self.config.targets, 1):
+            results.append(
+                self._run_one(account_index, target.cookie, target.domain)
+            )
         return results
 
     def _run_one(self, account_index: int, cookie: str, domain: str) -> CheckinResult:

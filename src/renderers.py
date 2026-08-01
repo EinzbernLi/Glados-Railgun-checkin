@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from html import escape
 
-from .models import NotificationModel, RenderedMessage
+from .models import BEIJING_TIMEZONE, NotificationModel, RenderedMessage
 
 
 def _group(model: NotificationModel):
@@ -19,11 +19,20 @@ def _exchange_text(result) -> str:
     return result.exchange_message
 
 
+def _time_text(model: NotificationModel) -> str:
+    value = model.generated_at
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=BEIJING_TIMEZONE)
+    else:
+        value = value.astimezone(BEIJING_TIMEZONE)
+    return f"{value:%Y-%m-%d %H:%M}（北京时间）"
+
+
 class TextRenderer:
     def render(self, model: NotificationModel) -> RenderedMessage:
         lines = [model.summary, ""]
         for account, results in _group(model).items():
-            lines.append(f"账号 {account}")
+            lines.append(f"签到目标 {account}")
             for result in results:
                 days = f"{result.days} 天" if result.days is not None else "未知"
                 points = (
@@ -39,7 +48,7 @@ class TextRenderer:
                 if result.error:
                     lines.append(f"错误  {result.error}")
             lines.append("")
-        lines.append(f"运行时间  {model.generated_at:%Y-%m-%d %H:%M}")
+        lines.append(f"运行时间  {_time_text(model)}")
         return RenderedMessage(model.title, "\n".join(lines).strip())
 
 
@@ -47,12 +56,13 @@ class MarkdownRenderer:
     def render(self, model: NotificationModel) -> RenderedMessage:
         lines = [f"## {model.title}", model.summary]
         for account, results in _group(model).items():
-            lines.extend(["", f"### 账号 {account}"])
+            lines.extend(["", f"### 签到目标 {account}"])
             for result in results:
                 lines.append(
                     f"- **{result.domain}**：{result.checkin_state.label}；"
                     f"{_exchange_text(result)}"
                 )
+        lines.extend(["", f"运行时间：{_time_text(model)}"])
         return RenderedMessage(model.title, "\n".join(lines))
 
 
@@ -63,7 +73,7 @@ class PushPlusRenderer:
             f"<p>{escape(model.summary)}</p>",
         ]
         for account, results in _group(model).items():
-            parts.append(f"<h3>账号 {account}</h3>")
+            parts.append(f"<h3>签到目标 {account}</h3>")
             for result in results:
                 days = f"{result.days} 天" if result.days is not None else "未知"
                 points = (
@@ -81,7 +91,7 @@ class PushPlusRenderer:
                     + (f"<br>错误　{escape(result.error)}" if result.error else "")
                     + "</p>"
                 )
-        parts.append(f"<p>运行时间　{model.generated_at:%Y-%m-%d %H:%M}</p>")
+        parts.append(f"<p>运行时间　{escape(_time_text(model))}</p>")
         return RenderedMessage(model.title, "".join(parts))
 
 
@@ -89,10 +99,13 @@ class TelegramRenderer:
     max_length = 3900
 
     def render(self, model: NotificationModel) -> list[RenderedMessage]:
-        header = f"<b>{escape(model.title)}</b>\n{escape(model.summary)}"
+        header = (
+            f"<b>{escape(model.title)}</b>\n{escape(model.summary)}\n"
+            f"运行时间　{escape(_time_text(model))}"
+        )
         blocks = []
         for account, results in _group(model).items():
-            lines = [f"<b>账号 {account}</b>"]
+            lines = [f"<b>签到目标 {account}</b>"]
             for result in results:
                 lines.append(
                     f"{escape(result.domain)}　{escape(result.checkin_state.label)}"

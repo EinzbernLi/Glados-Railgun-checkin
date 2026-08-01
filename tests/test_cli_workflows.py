@@ -21,7 +21,7 @@ def test_dry_run_uses_fake_values_and_makes_no_network(capsys):
 
     assert main(["--dry-run"], environ=env, api_factory=forbidden_factory) == 0
     output = capsys.readouterr().out
-    assert "账号数: 2" in output
+    assert "签到目标数: 2" in output
     assert "pushplus" in output
     assert "fake-cookie" not in output
     assert "fake-token" not in output
@@ -32,6 +32,27 @@ def test_config_error_returns_two_without_constructing_api():
         raise AssertionError("config error must stop before API construction")
 
     assert main([], environ={}, api_factory=forbidden_factory) == 2
+
+
+def test_ambiguous_legacy_domains_stop_before_api_construction():
+    def forbidden_factory(*_):
+        raise AssertionError("ambiguous config must stop before API construction")
+
+    env = {
+        "GLADOS_COOKIES": "fake-cookie",
+        "GLADOS_DOMAINS": "glados.cloud,railgun.info",
+    }
+    assert main([], environ=env, api_factory=forbidden_factory) == 2
+
+
+def test_unauthorized_custom_domain_stops_before_api_construction():
+    def forbidden_factory(*_):
+        raise AssertionError("unsafe config must stop before API construction")
+
+    env = {
+        "CUSTOM_DOMAIN_COOKIES": '{"check.example.com":["fake-cookie"]}'
+    }
+    assert main([], environ=env, api_factory=forbidden_factory) == 2
 
 
 class SuccessfulAPI:
@@ -142,6 +163,8 @@ def test_scheduled_workflow_has_safe_triggers_and_cron():
     assert "continue-on-error" not in text
     assert "contents: read" in text
     assert "timeout-minutes: 3" in text
+    assert "RAILGUN_COOKIES: ${{ secrets.RAILGUN_COOKIES }}" in text
+    assert "CUSTOM_DOMAIN_COOKIES: ${{ secrets.CUSTOM_DOMAIN_COOKIES }}" in text
 
 
 def test_all_actions_are_pinned_to_commit_sha():
@@ -171,3 +194,14 @@ def test_readme_documents_all_exchange_plans_and_disable_switch():
     assert "| `plan200` | 200 积分 | 30 天 |" in text
     assert "| `plan500` | 500 积分 | 100 天 |" in text
     assert "GLADOS_ENABLE_EXCHANGE=false" in text
+
+
+def test_readme_documents_domain_binding_aggregation_and_beijing_time():
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "GLADOS_COOKIES" in text and "glados.cloud" in text
+    assert "RAILGUN_COOKIES" in text and "railgun.info" in text
+    assert "CUSTOM_DOMAIN_COOKIES" in text
+    assert '{"check.example.com":["cookie-account-1","cookie-account-2"]}' in text
+    assert "一张 HTML 卡片" in text
+    assert "一张 Markdown 卡片" in text
+    assert "北京时间" in text

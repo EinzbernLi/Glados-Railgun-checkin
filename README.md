@@ -3,14 +3,14 @@
 [![CI](https://github.com/EinzbernLi/Glados-Railgun-checkin/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/EinzbernLi/Glados-Railgun-checkin/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
-基于 GitHub Actions 的 GLaDOS / Railgun 多账号自动签到工具。支持积分兑换、失败重试和 PushDeer、PushPlus、Telegram 通知；无需自建服务器。
+基于 GitHub Actions 的 GLaDOS / Railgun 多账号自动签到工具。每份 Cookie 与目标域名显式绑定，支持积分兑换、失败重试和 PushDeer、PushPlus、Telegram 聚合通知；无需自建服务器。
 
-- 多账号、多域名与可选积分兑换
+- 多账号、多域名、Cookie 防串用与可选积分兑换
 - 默认定时运行，也支持手动 `dry-run` 和 `live`
 - Cookie 域名校验、日志脱敏与有限重试
 - 独立 CI；代码 push 不会触发真实签到
 
-> 定时任务默认在每天 UTC 04:00、10:00 运行，对应香港/北京时间 12:00、18:00。GitHub Actions 的计划任务可能延迟，并不保证准点启动。
+> 定时任务默认在每天 UTC 04:00、10:00 运行，对应香港/北京时间 12:00、18:00。通知中的运行时间始终转换并标注为北京时间。GitHub Actions 的计划任务可能延迟，并不保证准点启动。
 
 ## 快速开始
 
@@ -20,7 +20,7 @@
 
 ### 2. 获取 Cookie
 
-1. 登录 GLaDOS 或 Railgun 并打开签到页面。
+1. 登录需要签到的 GLaDOS、Railgun 或兼容服务并打开签到页面。
 2. 按 **F12** 打开开发者工具，进入 **Network（网络）**。
 3. 刷新页面，选择签到相关请求。
 4. 在 **Request Headers（请求标头）** 中复制完整的 <code>Cookie</code> 值。
@@ -34,7 +34,7 @@
 
 </details>
 
-Cookie 属于敏感凭证。不要把真实值写入代码、Issue、日志或测试。
+不同域名通常使用不同 Cookie。请分别复制，并确保后续保存到对应的 Secret。Cookie 属于敏感凭证，不要把真实值写入代码、Issue、日志、README 或测试。
 
 ### 3. 配置 GitHub Secret
 
@@ -42,18 +42,22 @@ Cookie 属于敏感凭证。不要把真实值写入代码、Issue、日志或�
 
 **Settings → Secrets and variables → Actions → New repository secret**
 
-至少添加：
+按实际使用的服务至少添加下面一项：
 
 | Secret | 是否必需 | 内容 |
 |---|---:|---|
-| <code>GLADOS_COOKIES</code> | 是 | 完整 Cookie；多个账号使用 <code>&amp;</code> 连接 |
+| <code>GLADOS_COOKIES</code> | 条件必需 | 仅用于 <code>glados.cloud</code> 的完整 Cookie；多个账号使用 <code>&amp;</code> 连接 |
+| <code>RAILGUN_COOKIES</code> | 条件必需 | 仅用于 <code>railgun.info</code> 的完整 Cookie；多个账号使用 <code>&amp;</code> 连接 |
+| <code>CUSTOM_DOMAIN_COOKIES</code> | 条件必需 | 其他兼容域名的 JSON 映射，格式见“自定义域名” |
 | <code>GLADOS_EXCHANGE_PLAN</code> | 否 | <code>plan100</code>、<code>plan200</code> 或 <code>plan500</code>，默认 <code>plan500</code> |
 
-多账号示例：
+同一服务的多账号示例：
 
 ~~~text
 cookie-account-1&cookie-account-2
 ~~~
+
+这三个 Cookie Secret 至少配置一个。程序不会把 `GLADOS_COOKIES` 自动尝试到 Railgun，也不会把 `RAILGUN_COOKIES` 发送到 GLaDOS。
 
 #### 积分兑换策略
 
@@ -98,13 +102,22 @@ cookie-account-1&cookie-account-2
 
 完全不配置通知时，签到仍可正常运行。
 
+### 通知内容与聚合方式
+
+同一次运行的所有 GLaDOS、Railgun 和自定义域名结果会先汇总，再向每个已启用的通知渠道发送：
+
+- PushPlus：一张 HTML 卡片，包含全部签到目标。
+- PushDeer：一张 Markdown 卡片，包含全部签到目标。
+- Telegram：正常情况下为一条消息；只有超过平台安全长度时才按完整目标区块拆分。
+
+通知标题使用“签到汇总完成”或“签到汇总异常”，正文按“签到目标 1、签到目标 2……”展示域名、签到状态、剩余天数、积分、本次新增积分、兑换结果和错误摘要。底部运行时间统一显示为 `YYYY-MM-DD HH:MM（北京时间）`。通知内容不会包含 Cookie 或通知 token。
+
 ## 可选配置
 
 以下项目在 **Settings → Secrets and variables → Actions → Variables** 中配置，未填写时使用默认值。
 
 | Variable | 默认值 | 作用 |
 |---|---|---|
-| <code>GLADOS_DOMAINS</code> | <code>glados.cloud,railgun.info</code> | 逗号分隔的签到域名 |
 | <code>GLADOS_ALLOW_CUSTOM_DOMAINS</code> | <code>false</code> | 是否允许自定义域名 |
 | <code>GLADOS_ENABLE_EXCHANGE</code> | <code>true</code> | 是否自动兑换积分 |
 | <code>GLADOS_RETRY_MAX</code> | <code>2</code> | 网络重试次数，允许 0–5 |
@@ -121,7 +134,21 @@ cookie-account-1&cookie-account-2
 
 ### 自定义域名限制
 
-默认只允许 <code>glados.cloud</code> 和 <code>railgun.info</code>。如需使用其他域名，必须同时设置 <code>GLADOS_ALLOW_CUSTOM_DOMAINS=true</code>。自定义值必须是纯 DNS 主机名，不得包含协议、路径、端口、userinfo 或 IP 地址；所有请求始终使用 HTTPS。
+其他域名必须与本项目使用的 Cookie 认证和 API 路径兼容。配置步骤：
+
+1. 在 **Repository variables** 添加 `GLADOS_ALLOW_CUSTOM_DOMAINS=true`。
+2. 在 **Repository secrets** 添加 `CUSTOM_DOMAIN_COOKIES`。
+3. Secret 值使用 JSON 对象，键是纯域名，值是该域名的 Cookie 列表。例如：
+
+~~~json
+{"check.example.com":["cookie-account-1","cookie-account-2"]}
+~~~
+
+可在同一个对象中添加多个域名；每个 Cookie 只会发送到它所在键对应的域名。`glados.cloud` 和 `railgun.info` 不得在这里重复配置，应使用各自的专属 Secret。
+
+自定义域名不得包含协议、路径、端口、userinfo 或 IP 地址；所有请求始终使用 HTTPS。这里配置的是签到 Cookie，不是 PushPlus、Telegram 等通知服务的 token。
+
+旧版 `GLADOS_DOMAINS` 仅保留单域兼容：它只能把旧 `GLADOS_COOKIES` 指向一个域名。多个域名无法确定每份 Cookie 的归属，程序会在网络请求前拒绝运行；新配置请勿继续使用该变量。
 
 ## 本地运行
 
@@ -130,6 +157,14 @@ cookie-account-1&cookie-account-2
 ~~~powershell
 python -m pip install -r requirements.txt
 $env:GLADOS_COOKIES = "your-cookie"
+python checkin.py
+~~~
+
+同时运行 Railgun：
+
+~~~powershell
+$env:GLADOS_COOKIES = "your-glados-cookie"
+$env:RAILGUN_COOKIES = "your-railgun-cookie"
 python checkin.py
 ~~~
 
@@ -149,7 +184,7 @@ python checkin.py --dry-run
 
 ## 安全设计
 
-- Cookie 只发送到经过校验的 HTTPS 签到域名。
+- Cookie 只发送到与其显式绑定且经过校验的 HTTPS 签到域名。
 - 通知服务不会收到 Cookie。
 - 日志、异常摘要和 <code>--dry-run</code> 不输出 Cookie、token、SendKey 或 Chat ID。
 - CI 不读取 Secrets，也不执行真实签到、兑换或通知。
@@ -189,6 +224,14 @@ GitHub 不保证 scheduled workflow 准点执行，高峰期可能延迟。先�
 ### 积分不足会尝试兑换吗？
 
 不会。只有积分查询成功、兑换已启用并达到所选计划门槛时才调用兑换接口。
+
+### 多个域名会收到多条通知吗？
+
+不会按域名单独推送。一次运行的所有结果会聚合到每个通知渠道的一张卡片中；只有 Telegram 内容超过长度上限时才会拆分。
+
+### 为什么通知时间与 Actions 日志时间不同？
+
+Actions 日志和 cron 使用 UTC，而通知中的运行时间会转换为 `Asia/Shanghai` 并明确标注“北京时间”。
 
 ### 如何停止自动签到？
 

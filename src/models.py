@@ -3,6 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from zoneinfo import ZoneInfo
+
+
+BEIJING_TIMEZONE = ZoneInfo("Asia/Shanghai")
+
+
+def beijing_now() -> datetime:
+    return datetime.now(BEIJING_TIMEZONE)
 
 
 class CheckinState(str, Enum):
@@ -65,7 +73,7 @@ class NotificationModel:
     summary: str
     severity: str
     results: list[CheckinResult]
-    generated_at: datetime = field(default_factory=datetime.now)
+    generated_at: datetime = field(default_factory=beijing_now)
 
     @classmethod
     def from_results(cls, results: list[CheckinResult]) -> "NotificationModel":
@@ -73,20 +81,20 @@ class NotificationModel:
         failures = sum(result.failed for result in results)
         if failures:
             return cls(
-                title=f"GLaDOS 签到异常｜{failures} 项需要处理",
-                summary=f"{accounts} 个账号 · {failures} 项异常",
+                title=f"签到汇总异常｜{failures} 项需要处理",
+                summary=f"{accounts} 个签到目标 · {failures} 项异常",
                 severity="error",
                 results=results,
             )
         if accounts == 1:
             days = next((r.days for r in results if r.days is not None), None)
             suffix = f"剩余 {days} 天" if days is not None else "0 异常"
-            title = f"GLaDOS 签到完成｜1 个账号 · {suffix}"
+            title = f"签到汇总完成｜1 个签到目标 · {suffix}"
         else:
-            title = f"GLaDOS 签到完成｜{accounts} 个账号 · 0 异常"
+            title = f"签到汇总完成｜{accounts} 个签到目标 · 0 异常"
         return cls(
             title=title,
-            summary=f"{accounts} 个账号 · 0 项异常",
+            summary=f"{accounts} 个签到目标 · 0 项异常",
             severity="success",
             results=results,
         )

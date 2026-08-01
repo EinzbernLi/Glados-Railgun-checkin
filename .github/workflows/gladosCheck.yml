@@ -50,6 +50,8 @@ jobs:
           fi
         env:
           GLADOS_COOKIES: ${{ secrets.GLADOS_COOKIES }}
+          RAILGUN_COOKIES: ${{ secrets.RAILGUN_COOKIES }}
+          CUSTOM_DOMAIN_COOKIES: ${{ secrets.CUSTOM_DOMAIN_COOKIES }}
           GLADOS_DOMAINS: ${{ vars.GLADOS_DOMAINS }}
           GLADOS_ALLOW_CUSTOM_DOMAINS: ${{ vars.GLADOS_ALLOW_CUSTOM_DOMAINS }}
           GLADOS_EXCHANGE_PLAN: ${{ secrets.GLADOS_EXCHANGE_PLAN }}

@@ -86,7 +86,7 @@ def test_failed_points_query_never_exchanges():
     assert result.exchange_state is ExchangeState.SKIPPED
 
 
-def test_all_account_domain_pairs_continue_after_failure():
+def test_all_explicit_targets_continue_after_failure_without_cross_product():
     scenarios = iter(
         [
             Scenario(checkin_state=CheckinState.NETWORK_ERROR),
@@ -97,14 +97,27 @@ def test_all_account_domain_pairs_continue_after_failure():
     )
     apis = []
 
-    def factory(*_):
+    factory_calls = []
+
+    def factory(domain, cookie):
+        factory_calls.append((domain, cookie))
         api = FakeAPI(next(scenarios))
         apis.append(api)
         return api
 
-    config = make_config(cookies="fake-a&fake-b", domains="glados.cloud,railgun.info")
+    config = make_config(
+        cookies="glados-a&glados-b",
+        domains="",
+        RAILGUN_COOKIES="railgun-a&railgun-b",
+    )
     results = Checker(config, factory).run()
     assert len(results) == 4
+    assert factory_calls == [
+        ("glados.cloud", "glados-a"),
+        ("glados.cloud", "glados-b"),
+        ("railgun.info", "railgun-a"),
+        ("railgun.info", "railgun-b"),
+    ]
     assert [result.checkin_state for result in results] == [
         CheckinState.NETWORK_ERROR,
         CheckinState.SUCCESS,

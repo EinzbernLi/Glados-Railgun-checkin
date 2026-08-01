@@ -39,7 +39,7 @@ def main(
     if args.dry_run:
         summary = config.safe_summary()
         print("配置验证通过（未执行网络请求）")
-        print(f"账号数: {summary['accounts']}")
+        print(f"签到目标数: {summary['accounts']}")
         print(f"域名: {', '.join(summary['domains'])}")
         print(
             f"兑换: {'启用' if summary['exchange_enabled'] else '关闭'} · "

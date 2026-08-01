@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 from dataclasses import dataclass
 from typing import Mapping
@@ -63,9 +64,61 @@ def _valid_hostname(host: str) -> bool:
 
 
 @dataclass(frozen=True)
+class CheckinTarget:
+    domain: str
+    cookie: str
+
+
+def _cookies(value: str | None) -> tuple[str, ...]:
+    return tuple(item.strip() for item in (value or "").split("&") if item.strip())
+
+
+def _validated_domain(domain: object, name: str) -> str:
+    if not isinstance(domain, str):
+        raise ConfigError(f"{name} 中的域名必须是字符串")
+    normalized = domain.strip().lower()
+    if not _valid_hostname(normalized):
+        raise ConfigError(f"{name} 只能包含纯 DNS 主机名")
+    return normalized
+
+
+def _custom_targets(value: str | None, allow_custom: bool) -> list[CheckinTarget]:
+    if value is None or not value.strip():
+        return []
+    try:
+        mapping = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ConfigError("CUSTOM_DOMAIN_COOKIES 必须是有效 JSON 对象") from exc
+    if not isinstance(mapping, dict) or not mapping:
+        raise ConfigError("CUSTOM_DOMAIN_COOKIES 必须是非空 JSON 对象")
+    if not allow_custom:
+        raise ConfigError(
+            "CUSTOM_DOMAIN_COOKIES 需要 GLADOS_ALLOW_CUSTOM_DOMAINS=true"
+        )
+
+    targets = []
+    seen_domains = set()
+    for raw_domain, raw_cookies in mapping.items():
+        domain = _validated_domain(raw_domain, "CUSTOM_DOMAIN_COOKIES")
+        if domain in DEFAULT_DOMAINS:
+            raise ConfigError(
+                "CUSTOM_DOMAIN_COOKIES 不得重复内置域名，请使用对应专属 Secret"
+            )
+        if domain in seen_domains:
+            raise ConfigError("CUSTOM_DOMAIN_COOKIES 包含重复域名")
+        seen_domains.add(domain)
+        if not isinstance(raw_cookies, list) or not raw_cookies:
+            raise ConfigError("CUSTOM_DOMAIN_COOKIES 中每个域名必须对应非空 Cookie 列表")
+        for cookie in raw_cookies:
+            if not isinstance(cookie, str) or not cookie.strip():
+                raise ConfigError("CUSTOM_DOMAIN_COOKIES 中的 Cookie 必须是非空字符串")
+            targets.append(CheckinTarget(domain, cookie.strip()))
+    return targets
+
+
+@dataclass(frozen=True)
 class AppConfig:
-    cookies: tuple[str, ...]
-    domains: tuple[str, ...]
+    targets: tuple[CheckinTarget, ...]
     exchange_plan: str
     enable_exchange: bool
     verbose: bool
@@ -80,33 +133,45 @@ class AppConfig:
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "AppConfig":
-        cookies = tuple(
-            item.strip()
-            for item in (environ.get("GLADOS_COOKIES") or "").split("&")
-            if item.strip()
-        )
-        if not cookies:
-            raise ConfigError("GLADOS_COOKIES 缺少有效账号")
-
-        domains = tuple(
-            item.strip().lower()
-            for item in (
-                environ.get("GLADOS_DOMAINS") or ",".join(DEFAULT_DOMAINS)
-            ).split(",")
-            if item.strip()
-        )
-        if not domains:
-            raise ConfigError("GLADOS_DOMAINS 不能为空")
-        if any(not _valid_hostname(domain) for domain in domains):
-            raise ConfigError("GLADOS_DOMAINS 只能包含纯 DNS 主机名")
-        custom = any(domain not in DEFAULT_DOMAINS for domain in domains)
+        glados_cookies = _cookies(environ.get("GLADOS_COOKIES"))
+        railgun_cookies = _cookies(environ.get("RAILGUN_COOKIES"))
         allow_custom = _bool(
             environ.get("GLADOS_ALLOW_CUSTOM_DOMAINS"),
             False,
             "GLADOS_ALLOW_CUSTOM_DOMAINS",
         )
-        if custom and not allow_custom:
-            raise ConfigError("自定义域名需要 GLADOS_ALLOW_CUSTOM_DOMAINS=true")
+
+        targets = []
+        legacy_domains = environ.get("GLADOS_DOMAINS")
+        if legacy_domains is not None and legacy_domains.strip():
+            domains = tuple(
+                _validated_domain(item, "GLADOS_DOMAINS")
+                for item in legacy_domains.split(",")
+                if item.strip()
+            )
+            if len(domains) != 1:
+                raise ConfigError(
+                    "GLADOS_DOMAINS 多域映射不明确；请改用域名专属 Secret"
+                )
+            legacy_domain = domains[0]
+            if legacy_domain not in DEFAULT_DOMAINS and not allow_custom:
+                raise ConfigError("自定义域名需要 GLADOS_ALLOW_CUSTOM_DOMAINS=true")
+            if legacy_domain == "railgun.info" and railgun_cookies:
+                raise ConfigError(
+                    "旧 GLADOS_DOMAINS=railgun.info 不能与 RAILGUN_COOKIES 同时使用"
+                )
+            targets.extend(CheckinTarget(legacy_domain, item) for item in glados_cookies)
+        else:
+            targets.extend(CheckinTarget("glados.cloud", item) for item in glados_cookies)
+
+        targets.extend(CheckinTarget("railgun.info", item) for item in railgun_cookies)
+        targets.extend(
+            _custom_targets(environ.get("CUSTOM_DOMAIN_COOKIES"), allow_custom)
+        )
+        if not targets:
+            raise ConfigError(
+                "至少配置 GLADOS_COOKIES、RAILGUN_COOKIES 或 CUSTOM_DOMAIN_COOKIES 之一"
+            )
 
         plan = (environ.get("GLADOS_EXCHANGE_PLAN") or "plan500").strip()
         if plan not in EXCHANGE_PLANS:
@@ -120,8 +185,7 @@ class AppConfig:
             raise ConfigError("TG_BOT_TOKEN 与 TG_CHAT_ID 必须同时配置")
 
         return cls(
-            cookies=cookies,
-            domains=domains,
+            targets=tuple(targets),
             exchange_plan=plan,
             enable_exchange=_bool(
                 environ.get("GLADOS_ENABLE_EXCHANGE"),
@@ -160,6 +224,14 @@ class AppConfig:
         )
 
     @property
+    def cookies(self) -> tuple[str, ...]:
+        return tuple(target.cookie for target in self.targets)
+
+    @property
+    def domains(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(target.domain for target in self.targets))
+
+    @property
     def enabled_channels(self) -> tuple[str, ...]:
         channels = []
         if self.pushdeer_sendkey:
@@ -173,7 +245,7 @@ class AppConfig:
     def safe_summary(self) -> dict[str, object]:
         threshold, days = EXCHANGE_PLANS[self.exchange_plan]
         return {
-            "accounts": len(self.cookies),
+            "accounts": len(self.targets),
             "domains": self.domains,
             "exchange_enabled": self.enable_exchange,
             "exchange_plan": self.exchange_plan,

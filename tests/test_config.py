@@ -10,10 +10,14 @@ def base_env(**overrides):
     return env
 
 
-def test_parses_multiple_accounts_and_default_domains():
+def test_glados_cookies_bind_only_to_glados_domain():
     config = AppConfig.from_env(base_env(GLADOS_COOKIES=" fake-a & & fake-b "))
     assert config.cookies == ("fake-a", "fake-b")
-    assert config.domains == ("glados.cloud", "railgun.info")
+    assert config.domains == ("glados.cloud",)
+    assert [(target.domain, target.cookie) for target in config.targets] == [
+        ("glados.cloud", "fake-a"),
+        ("glados.cloud", "fake-b"),
+    ]
 
 
 @pytest.mark.parametrize("value", [None, "", "  ", "&&"])
@@ -21,6 +25,24 @@ def test_missing_or_empty_cookie_is_config_error(value):
     env = {} if value is None else {"GLADOS_COOKIES": value}
     with pytest.raises(ConfigError):
         AppConfig.from_env(env)
+
+
+def test_railgun_cookie_can_be_used_without_glados_cookie():
+    config = AppConfig.from_env({"RAILGUN_COOKIES": "railgun-a&railgun-b"})
+    assert [(target.domain, target.cookie) for target in config.targets] == [
+        ("railgun.info", "railgun-a"),
+        ("railgun.info", "railgun-b"),
+    ]
+
+
+def test_builtin_cookie_groups_never_cross_domains():
+    config = AppConfig.from_env(
+        {"GLADOS_COOKIES": "glados-a", "RAILGUN_COOKIES": "railgun-a"}
+    )
+    assert [(target.domain, target.cookie) for target in config.targets] == [
+        ("glados.cloud", "glados-a"),
+        ("railgun.info", "railgun-a"),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -55,6 +77,63 @@ def test_custom_domain_requires_explicit_opt_in():
         )
     )
     assert config.domains == ("check.example.com",)
+
+
+def test_custom_domain_json_creates_explicit_targets():
+    config = AppConfig.from_env(
+        {
+            "CUSTOM_DOMAIN_COOKIES": (
+                '{"check.example.com":["custom-a","custom-b"]}'
+            ),
+            "GLADOS_ALLOW_CUSTOM_DOMAINS": "true",
+        }
+    )
+    assert [(target.domain, target.cookie) for target in config.targets] == [
+        ("check.example.com", "custom-a"),
+        ("check.example.com", "custom-b"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        "not-json",
+        "[]",
+        "{}",
+        '{"check.example.com":[]}',
+        '{"check.example.com":[""]}',
+        '{"glados.cloud":["duplicate"]}',
+    ],
+)
+def test_rejects_invalid_custom_domain_mappings(mapping):
+    with pytest.raises(ConfigError):
+        AppConfig.from_env(
+            {
+                "CUSTOM_DOMAIN_COOKIES": mapping,
+                "GLADOS_ALLOW_CUSTOM_DOMAINS": "true",
+            }
+        )
+
+
+def test_custom_domain_json_requires_explicit_opt_in():
+    with pytest.raises(ConfigError):
+        AppConfig.from_env(
+            {"CUSTOM_DOMAIN_COOKIES": '{"check.example.com":["custom-a"]}'}
+        )
+
+
+def test_legacy_multi_domain_configuration_is_rejected_as_ambiguous():
+    with pytest.raises(ConfigError, match="映射不明确"):
+        AppConfig.from_env(
+            base_env(GLADOS_DOMAINS="glados.cloud,railgun.info")
+        )
+
+
+def test_legacy_single_railgun_domain_remains_compatible():
+    config = AppConfig.from_env(base_env(GLADOS_DOMAINS="railgun.info"))
+    assert [(target.domain, target.cookie) for target in config.targets] == [
+        ("railgun.info", "fake-cookie-a")
+    ]
 
 
 @pytest.mark.parametrize(
@@ -102,3 +181,15 @@ def test_summary_never_contains_secrets():
     text = repr(summary)
     assert "fake-cookie-never-print" not in text
     assert "fake-token-never-print" not in text
+
+
+def test_summary_counts_targets_and_unique_domains():
+    config = AppConfig.from_env(
+        {
+            "GLADOS_COOKIES": "glados-a&glados-b",
+            "RAILGUN_COOKIES": "railgun-a",
+        }
+    )
+    summary = config.safe_summary()
+    assert summary["accounts"] == 3
+    assert summary["domains"] == ("glados.cloud", "railgun.info")
