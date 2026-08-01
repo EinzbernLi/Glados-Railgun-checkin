@@ -1,0 +1,16 @@
+Glados-Railgun-checkin
+Copyright and source attribution
+
+This project remains licensed under GNU GPL-3.0.
+
+Primary source:
+  EinzbernLi/Glados-Railgun-checkin
+  baseline 4c00e5e2f542223021c69778c6e8b11212745fd3
+
+GPL-3.0 architectural reference:
+  EinzbernLi/Glados_checkin
+  f29e6e33ca16b319eca9ea810ead7cf53aed92a1
+
+Idea-only reference (no substantial code copied because no identifiable license):
+  yangmeng611/GLaDOS-CheckIn
+  0a8333409eeb4c8445ceacb3a4043aab7ab9b988
