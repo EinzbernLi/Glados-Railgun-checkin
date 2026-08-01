@@ -45,6 +45,62 @@ def test_builtin_cookie_groups_never_cross_domains():
     ]
 
 
+def test_builtin_services_bind_independent_exchange_policies():
+    config = AppConfig.from_env(
+        {
+            "GLADOS_COOKIES": "glados-a",
+            "RAILGUN_COOKIES": "railgun-a",
+            "GLADOS_EXCHANGE_PLAN": "plan100",
+            "GLADOS_ENABLE_EXCHANGE": "true",
+            "RAILGUN_EXCHANGE_PLAN": "plan500",
+            "RAILGUN_ENABLE_EXCHANGE": "false",
+        }
+    )
+    assert [
+        (target.domain, target.exchange_plan, target.enable_exchange)
+        for target in config.targets
+    ] == [
+        ("glados.cloud", "plan100", True),
+        ("railgun.info", "plan500", False),
+    ]
+
+
+def test_railgun_policy_inherits_glados_policy_when_unset_or_empty():
+    overrides = (
+        {},
+        {"RAILGUN_EXCHANGE_PLAN": "", "RAILGUN_ENABLE_EXCHANGE": ""},
+    )
+    for railgun_overrides in overrides:
+        config = AppConfig.from_env(
+            {
+                "RAILGUN_COOKIES": "railgun-a",
+                "GLADOS_EXCHANGE_PLAN": "plan200",
+                "GLADOS_ENABLE_EXCHANGE": "false",
+                **railgun_overrides,
+            }
+        )
+        target = config.targets[0]
+        assert (target.exchange_plan, target.enable_exchange) == ("plan200", False)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("GLADOS_EXCHANGE_PLAN", "plan999"),
+        ("RAILGUN_EXCHANGE_PLAN", "plan999"),
+        ("RAILGUN_ENABLE_EXCHANGE", "sometimes"),
+    ],
+)
+def test_rejects_invalid_builtin_exchange_policy(name, value):
+    with pytest.raises(ConfigError, match=name):
+        AppConfig.from_env(
+            {
+                "RAILGUN_COOKIES": "railgun-a",
+                name: value,
+            }
+        )
+
+
 @pytest.mark.parametrize(
     "domain",
     [
@@ -94,6 +150,40 @@ def test_custom_domain_json_creates_explicit_targets():
     ]
 
 
+def test_custom_domain_object_binds_its_own_policy_to_every_cookie():
+    config = AppConfig.from_env(
+        {
+            "CUSTOM_DOMAIN_COOKIES": (
+                '{"check.example.com":{"cookies":["custom-a","custom-b"],'
+                '"exchange_plan":"plan200","enable_exchange":false}}'
+            ),
+            "GLADOS_ALLOW_CUSTOM_DOMAINS": "true",
+            "GLADOS_EXCHANGE_PLAN": "plan100",
+            "GLADOS_ENABLE_EXCHANGE": "true",
+        }
+    )
+    assert [
+        (target.cookie, target.exchange_plan, target.enable_exchange)
+        for target in config.targets
+    ] == [
+        ("custom-a", "plan200", False),
+        ("custom-b", "plan200", False),
+    ]
+
+
+def test_custom_domain_legacy_list_inherits_glados_policy():
+    config = AppConfig.from_env(
+        {
+            "CUSTOM_DOMAIN_COOKIES": '{"check.example.com":["custom-a"]}',
+            "GLADOS_ALLOW_CUSTOM_DOMAINS": "true",
+            "GLADOS_EXCHANGE_PLAN": "plan100",
+            "GLADOS_ENABLE_EXCHANGE": "false",
+        }
+    )
+    target = config.targets[0]
+    assert (target.exchange_plan, target.enable_exchange) == ("plan100", False)
+
+
 @pytest.mark.parametrize(
     "mapping",
     [
@@ -103,6 +193,10 @@ def test_custom_domain_json_creates_explicit_targets():
         '{"check.example.com":[]}',
         '{"check.example.com":[""]}',
         '{"glados.cloud":["duplicate"]}',
+        '{"check.example.com":{}}',
+        '{"check.example.com":{"cookies":["safe"],"exchange_plan":"bad"}}',
+        '{"check.example.com":{"cookies":["safe"],"enable_exchange":"false"}}',
+        '{"check.example.com":{"cookies":["safe"],"enable_exchagne":false}}',
     ],
 )
 def test_rejects_invalid_custom_domain_mappings(mapping):
@@ -193,3 +287,52 @@ def test_summary_counts_targets_and_unique_domains():
     summary = config.safe_summary()
     assert summary["accounts"] == 3
     assert summary["domains"] == ("glados.cloud", "railgun.info")
+
+
+def test_summary_lists_each_target_policy_without_credentials():
+    config = AppConfig.from_env(
+        {
+            "GLADOS_COOKIES": "private-glados",
+            "RAILGUN_COOKIES": "private-railgun",
+            "GLADOS_EXCHANGE_PLAN": "plan100",
+            "RAILGUN_EXCHANGE_PLAN": "plan500",
+            "RAILGUN_ENABLE_EXCHANGE": "false",
+        }
+    )
+    summary = config.safe_summary()
+    assert summary["target_policies"] == (
+        {
+            "domain": "glados.cloud",
+            "accounts": 1,
+            "exchange_enabled": True,
+            "exchange_plan": "plan100",
+            "exchange_threshold": 100,
+            "exchange_days": 10,
+        },
+        {
+            "domain": "railgun.info",
+            "accounts": 1,
+            "exchange_enabled": False,
+            "exchange_plan": "plan500",
+            "exchange_threshold": 500,
+            "exchange_days": 100,
+        },
+    )
+    assert "private-glados" not in repr(summary)
+    assert "private-railgun" not in repr(summary)
+
+
+def test_custom_policy_error_never_echoes_cookie():
+    cookie = "private-cookie-must-not-appear"
+    with pytest.raises(ConfigError) as caught:
+        AppConfig.from_env(
+            {
+                "CUSTOM_DOMAIN_COOKIES": (
+                    '{"check.example.com":{"cookies":["'
+                    + cookie
+                    + '"],"exchange_plan":"bad"}}'
+                ),
+                "GLADOS_ALLOW_CUSTOM_DOMAINS": "true",
+            }
+        )
+    assert cookie not in str(caught.value)

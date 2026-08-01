@@ -18,6 +18,7 @@ class FakeAPI:
     def __init__(self, scenario):
         self.scenario = scenario
         self.calls = []
+        self.exchange_plans = []
 
     def status(self):
         self.calls.append("status")
@@ -37,6 +38,7 @@ class FakeAPI:
 
     def exchange(self, plan):
         self.calls.append("exchange")
+        self.exchange_plans.append(plan)
         if self.scenario.exchange_error:
             raise NetworkError("exchange timeout")
         return "兑换成功"
@@ -125,3 +127,47 @@ def test_all_explicit_targets_continue_after_failure_without_cross_product():
         CheckinState.AUTH_ERROR,
     ]
     assert all("close" in api.calls for api in apis)
+
+
+def test_each_service_uses_its_bound_exchange_plan():
+    apis = []
+
+    def factory(*_):
+        api = FakeAPI(Scenario(points=150))
+        apis.append(api)
+        return api
+
+    config = make_config(
+        cookies="glados-a",
+        domains="",
+        RAILGUN_COOKIES="railgun-a",
+        GLADOS_EXCHANGE_PLAN="plan100",
+        RAILGUN_EXCHANGE_PLAN="plan500",
+    )
+    results = Checker(config, factory).run()
+    assert apis[0].exchange_plans == ["plan100"]
+    assert apis[1].exchange_plans == []
+    assert results[0].exchange_plan == "plan100"
+    assert results[1].exchange_plan == "plan500"
+    assert results[1].points_needed == 350
+
+
+def test_railgun_exchange_can_be_disabled_independently():
+    apis = []
+
+    def factory(*_):
+        api = FakeAPI(Scenario(points=500))
+        apis.append(api)
+        return api
+
+    config = make_config(
+        cookies="glados-a",
+        domains="",
+        RAILGUN_COOKIES="railgun-a",
+        RAILGUN_ENABLE_EXCHANGE="false",
+    )
+    results = Checker(config, factory).run()
+    assert apis[0].exchange_plans == ["plan100"]
+    assert apis[1].exchange_plans == []
+    assert results[1].exchange_enabled is False
+    assert results[1].exchange_message == "兑换已关闭"

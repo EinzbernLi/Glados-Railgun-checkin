@@ -41,10 +41,14 @@ def main(
         print("配置验证通过（未执行网络请求）")
         print(f"签到目标数: {summary['accounts']}")
         print(f"域名: {', '.join(summary['domains'])}")
-        print(
-            f"兑换: {'启用' if summary['exchange_enabled'] else '关闭'} · "
-            f"{summary['exchange_plan']}"
-        )
+        print("兑换策略:")
+        for policy in summary["target_policies"]:
+            state = "启用" if policy["exchange_enabled"] else "关闭"
+            print(
+                f"- {policy['domain']}（{policy['accounts']} 个账号）: "
+                f"{state} · {policy['exchange_plan']} · "
+                f"{policy['exchange_threshold']} 积分兑换 {policy['exchange_days']} 天"
+            )
         print(f"通知渠道: {', '.join(summary['channels']) or '未配置'}")
         print(f"HTTP 最大尝试次数: {summary['retry_attempts']}")
         return 0

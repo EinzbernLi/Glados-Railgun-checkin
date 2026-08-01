@@ -52,6 +52,8 @@ class CheckinOutcome:
 class CheckinResult:
     account_index: int
     domain: str
+    exchange_plan: str = "plan500"
+    exchange_enabled: bool = True
     checkin_state: CheckinState = CheckinState.API_ERROR
     days: int | None = None
     points_total: int | None = None

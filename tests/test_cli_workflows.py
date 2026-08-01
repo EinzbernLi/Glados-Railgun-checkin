@@ -27,6 +27,22 @@ def test_dry_run_uses_fake_values_and_makes_no_network(capsys):
     assert "fake-token" not in output
 
 
+def test_dry_run_shows_each_domain_exchange_policy(capsys):
+    env = {
+        "GLADOS_COOKIES": "private-glados",
+        "RAILGUN_COOKIES": "private-railgun",
+        "GLADOS_EXCHANGE_PLAN": "plan100",
+        "RAILGUN_EXCHANGE_PLAN": "plan500",
+        "RAILGUN_ENABLE_EXCHANGE": "false",
+    }
+    assert main(["--dry-run"], environ=env) == 0
+    output = capsys.readouterr().out
+    assert "glados.cloud（1 个账号）: 启用 · plan100" in output
+    assert "railgun.info（1 个账号）: 关闭 · plan500" in output
+    assert "private-glados" not in output
+    assert "private-railgun" not in output
+
+
 def test_config_error_returns_two_without_constructing_api():
     def forbidden_factory(*_):
         raise AssertionError("config error must stop before API construction")
@@ -164,6 +180,8 @@ def test_scheduled_workflow_has_safe_triggers_and_cron():
     assert "contents: read" in text
     assert "timeout-minutes: 3" in text
     assert "RAILGUN_COOKIES: ${{ secrets.RAILGUN_COOKIES }}" in text
+    assert "RAILGUN_EXCHANGE_PLAN: ${{ secrets.RAILGUN_EXCHANGE_PLAN }}" in text
+    assert "RAILGUN_ENABLE_EXCHANGE: ${{ vars.RAILGUN_ENABLE_EXCHANGE }}" in text
     assert "CUSTOM_DOMAIN_COOKIES: ${{ secrets.CUSTOM_DOMAIN_COOKIES }}" in text
 
 
@@ -194,6 +212,9 @@ def test_readme_documents_all_exchange_plans_and_disable_switch():
     assert "| `plan200` | 200 积分 | 30 天 |" in text
     assert "| `plan500` | 500 积分 | 100 天 |" in text
     assert "GLADOS_ENABLE_EXCHANGE=false" in text
+    assert "RAILGUN_EXCHANGE_PLAN" in text
+    assert "RAILGUN_ENABLE_EXCHANGE=false" in text
+    assert "未配置 Railgun 专属值时" in text
 
 
 def test_readme_documents_domain_binding_aggregation_and_beijing_time():
@@ -202,6 +223,8 @@ def test_readme_documents_domain_binding_aggregation_and_beijing_time():
     assert "RAILGUN_COOKIES" in text and "railgun.info" in text
     assert "CUSTOM_DOMAIN_COOKIES" in text
     assert '{"check.example.com":["cookie-account-1","cookie-account-2"]}' in text
+    assert '"exchange_plan":"plan200"' in text
+    assert '"enable_exchange":false' in text
     assert "一张 HTML 卡片" in text
     assert "一张 Markdown 卡片" in text
     assert "北京时间" in text

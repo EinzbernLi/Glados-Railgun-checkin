@@ -49,7 +49,8 @@
 | <code>GLADOS_COOKIES</code> | 条件必需 | 仅用于 <code>glados.cloud</code> 的完整 Cookie；多个账号使用 <code>&amp;</code> 连接 |
 | <code>RAILGUN_COOKIES</code> | 条件必需 | 仅用于 <code>railgun.info</code> 的完整 Cookie；多个账号使用 <code>&amp;</code> 连接 |
 | <code>CUSTOM_DOMAIN_COOKIES</code> | 条件必需 | 其他兼容域名的 JSON 映射，格式见“自定义域名” |
-| <code>GLADOS_EXCHANGE_PLAN</code> | 否 | <code>plan100</code>、<code>plan200</code> 或 <code>plan500</code>，默认 <code>plan500</code> |
+| <code>GLADOS_EXCHANGE_PLAN</code> | 否 | GLaDOS 的兑换计划：<code>plan100</code>、<code>plan200</code> 或 <code>plan500</code>，默认 <code>plan500</code> |
+| <code>RAILGUN_EXCHANGE_PLAN</code> | 否 | Railgun 的兑换计划；未配置时继承 GLaDOS 的计划 |
 
 同一服务的多账号示例：
 
@@ -61,7 +62,12 @@ cookie-account-1&cookie-account-2
 
 #### 积分兑换策略
 
-在同一个 **Repository secrets** 页面添加 `GLADOS_EXCHANGE_PLAN`，值只能是下面三种之一：
+兑换计划与 Cookie 目标分别绑定，不同服务可以采用不同策略。在同一个 **Repository secrets** 页面按需添加：
+
+- `GLADOS_EXCHANGE_PLAN`：只配置 GLaDOS，默认 `plan500`。
+- `RAILGUN_EXCHANGE_PLAN`：只配置 Railgun；未配置 Railgun 专属值时继承 `GLADOS_EXCHANGE_PLAN`。
+
+两个 Secret 的值都只能是下面三种之一：
 
 | 配置值 | 所需积分 | 兑换时长 |
 |---|---:|---:|
@@ -69,13 +75,15 @@ cookie-account-1&cookie-account-2
 | `plan200` | 200 积分 | 30 天 |
 | `plan500` | 500 积分 | 100 天 |
 
-未配置 `GLADOS_EXCHANGE_PLAN` 时默认使用 `plan500`。程序会在签到后查询积分；只有积分查询成功、积分达到所选策略门槛且兑换功能已启用时，才会调用兑换接口。积分不足时不会兑换。
+例如，GLaDOS 使用 `plan100`、Railgun 使用 `plan500` 时，分别创建上述两个 Secret 并填写对应值。程序会在签到后逐目标查询积分；只有该目标积分查询成功、达到自己的策略门槛且自己的兑换开关已启用时，才会调用兑换接口。积分不足时不会兑换。
 
 如需完全关闭自动兑换，请进入：
 
 **Settings → Secrets and variables → Actions → Variables → New repository variable**
 
-添加变量 `GLADOS_ENABLE_EXCHANGE=false`。需要重新启用时，将它改为 `true` 或删除该变量（默认值为 `true`）。
+为 GLaDOS 添加变量 `GLADOS_ENABLE_EXCHANGE=false`；为 Railgun 添加 `RAILGUN_ENABLE_EXCHANGE=false`。需要重新启用时，将对应变量改为 `true` 或删除：GLaDOS 默认启用，未配置 Railgun 专属值时 Railgun 继承 GLaDOS 的开关。
+
+因此，计划和开关都能分别覆盖：只设置 `RAILGUN_EXCHANGE_PLAN` 不会改变 GLaDOS，只设置 `RAILGUN_ENABLE_EXCHANGE=false` 也只会关闭 Railgun 的兑换。为了兼容旧部署，如果两个 Railgun 专属配置都未设置，Railgun 会继续使用原有 GLaDOS 设置。
 
 ### 4. 先检查配置，再执行签到
 
@@ -110,7 +118,7 @@ cookie-account-1&cookie-account-2
 - PushDeer：一张 Markdown 卡片，包含全部签到目标。
 - Telegram：正常情况下为一条消息；只有超过平台安全长度时才按完整目标区块拆分。
 
-通知标题使用“签到汇总完成”或“签到汇总异常”，正文按“签到目标 1、签到目标 2……”展示域名、签到状态、剩余天数、积分、本次新增积分、兑换结果和错误摘要。底部运行时间统一显示为 `YYYY-MM-DD HH:MM（北京时间）`。通知内容不会包含 Cookie 或通知 token。
+通知标题使用“签到汇总完成”或“签到汇总异常”，正文按“签到目标 1、签到目标 2……”展示域名、签到状态、剩余天数、积分、本次新增积分、该目标实际使用的兑换计划与开关、兑换结果和错误摘要。底部运行时间统一显示为 `YYYY-MM-DD HH:MM（北京时间）`。通知内容不会包含 Cookie 或通知 token。
 
 ## 可选配置
 
@@ -119,7 +127,8 @@ cookie-account-1&cookie-account-2
 | Variable | 默认值 | 作用 |
 |---|---|---|
 | <code>GLADOS_ALLOW_CUSTOM_DOMAINS</code> | <code>false</code> | 是否允许自定义域名 |
-| <code>GLADOS_ENABLE_EXCHANGE</code> | <code>true</code> | 是否自动兑换积分 |
+| <code>GLADOS_ENABLE_EXCHANGE</code> | <code>true</code> | 是否为 GLaDOS 自动兑换积分 |
+| <code>RAILGUN_ENABLE_EXCHANGE</code> | 继承 GLaDOS | 是否为 Railgun 自动兑换积分 |
 | <code>GLADOS_RETRY_MAX</code> | <code>2</code> | 网络重试次数，允许 0–5 |
 | <code>GLADOS_RETRY_BACKOFF</code> | <code>0.5</code> | 指数退避基数秒数，允许 0–10 |
 
@@ -145,6 +154,14 @@ cookie-account-1&cookie-account-2
 ~~~
 
 可在同一个对象中添加多个域名；每个 Cookie 只会发送到它所在键对应的域名。`glados.cloud` 和 `railgun.info` 不得在这里重复配置，应使用各自的专属 Secret。
+
+旧列表格式会继承 GLaDOS 的兑换计划和开关。需要让某个自定义域名使用独立策略时，把该域名的值改成配置对象：
+
+~~~json
+{"check.example.com":{"cookies":["cookie-account-1","cookie-account-2"],"exchange_plan":"plan200","enable_exchange":false}}
+~~~
+
+`cookies` 必须是非空列表；`exchange_plan` 可选且只能使用上表三种计划；`enable_exchange` 可选且必须是 JSON 布尔值 `true` 或 `false`（不能写成字符串）。省略的策略字段继承 GLaDOS 设置。
 
 自定义域名不得包含协议、路径、端口、userinfo 或 IP 地址；所有请求始终使用 HTTPS。这里配置的是签到 Cookie，不是 PushPlus、Telegram 等通知服务的 token。
 

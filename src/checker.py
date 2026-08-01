@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .config import AppConfig
+from .config import AppConfig, CheckinTarget
 from .constants import EXCHANGE_PLANS
 from .exceptions import (
     ApiRejectedError,
@@ -24,14 +24,17 @@ class Checker:
     def run(self) -> list[CheckinResult]:
         results = []
         for account_index, target in enumerate(self.config.targets, 1):
-            results.append(
-                self._run_one(account_index, target.cookie, target.domain)
-            )
+            results.append(self._run_one(account_index, target))
         return results
 
-    def _run_one(self, account_index: int, cookie: str, domain: str) -> CheckinResult:
-        result = CheckinResult(account_index=account_index, domain=domain)
-        api = self.api_factory(domain, cookie)
+    def _run_one(self, account_index: int, target: CheckinTarget) -> CheckinResult:
+        result = CheckinResult(
+            account_index=account_index,
+            domain=target.domain,
+            exchange_plan=target.exchange_plan,
+            exchange_enabled=target.enable_exchange,
+        )
+        api = self.api_factory(target.domain, target.cookie)
         try:
             try:
                 result.days = api.status()
@@ -58,14 +61,16 @@ class Checker:
                 if not result.diagnostic:
                     result.diagnostic = _safe_error(exc)
 
-            self._exchange_if_eligible(api, result)
+            self._exchange_if_eligible(api, result, target)
             return result
         finally:
             api.close()
 
-    def _exchange_if_eligible(self, api, result: CheckinResult) -> None:
-        threshold, days = EXCHANGE_PLANS[self.config.exchange_plan]
-        if not self.config.enable_exchange:
+    def _exchange_if_eligible(
+        self, api, result: CheckinResult, target: CheckinTarget
+    ) -> None:
+        threshold, days = EXCHANGE_PLANS[target.exchange_plan]
+        if not target.enable_exchange:
             result.exchange_message = "兑换已关闭"
             return
         if result.points_total is None:
@@ -76,7 +81,7 @@ class Checker:
             result.exchange_message = f"未兑换 · 还差 {result.points_needed} 分"
             return
         try:
-            api.exchange(self.config.exchange_plan)
+            api.exchange(target.exchange_plan)
             result.exchange_state = ExchangeState.SUCCESS
             result.exchange_message = f"已兑换 {days} 天 · 消耗 {threshold} 分"
         except HANDLED_ERRORS as exc:

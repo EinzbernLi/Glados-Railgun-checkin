@@ -15,8 +15,11 @@ def _group(model: NotificationModel):
 
 def _exchange_text(result) -> str:
     if result.points_needed is not None and result.exchange_state.value == "skipped":
-        return f"未兑换 · 还差 {result.points_needed} 分"
-    return result.exchange_message
+        message = f"未兑换 · 还差 {result.points_needed} 分"
+    else:
+        message = result.exchange_message
+    state = "启用" if result.exchange_enabled else "关闭"
+    return f"{result.exchange_plan}（{state}） · {message}"
 
 
 def _time_text(model: NotificationModel) -> str:

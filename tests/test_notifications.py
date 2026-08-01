@@ -103,6 +103,40 @@ def test_multiple_domains_share_one_notification_model():
     assert "railgun.info" in telegram[0].body
 
 
+def test_aggregated_notification_shows_each_domain_actual_policy():
+    results = [
+        CheckinResult(
+            account_index=1,
+            domain="glados.cloud",
+            exchange_plan="plan100",
+            exchange_enabled=True,
+            checkin_state=CheckinState.ALREADY,
+            points_total=70,
+            points_needed=30,
+            exchange_message="未兑换 · 还差 30 分",
+        ),
+        CheckinResult(
+            account_index=2,
+            domain="railgun.info",
+            exchange_plan="plan500",
+            exchange_enabled=False,
+            checkin_state=CheckinState.ALREADY,
+            points_total=70,
+            exchange_message="兑换已关闭",
+        ),
+    ]
+    model = NotificationModel.from_results(results)
+    outputs = [
+        TextRenderer().render(model).body,
+        MarkdownRenderer().render(model).body,
+        PushPlusRenderer().render(model).body,
+        TelegramRenderer().render(model)[0].body,
+    ]
+    for output in outputs:
+        assert "plan100（启用）" in output
+        assert "plan500（关闭）" in output
+
+
 class SuccessfulPushResponse:
     status_code = 200
     content = b"json"

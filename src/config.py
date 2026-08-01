@@ -67,6 +67,8 @@ def _valid_hostname(host: str) -> bool:
 class CheckinTarget:
     domain: str
     cookie: str
+    exchange_plan: str
+    enable_exchange: bool
 
 
 def _cookies(value: str | None) -> tuple[str, ...]:
@@ -82,7 +84,20 @@ def _validated_domain(domain: object, name: str) -> str:
     return normalized
 
 
-def _custom_targets(value: str | None, allow_custom: bool) -> list[CheckinTarget]:
+def _exchange_plan(value: object, default: str, name: str) -> str:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return default
+    if not isinstance(value, str) or value.strip() not in EXCHANGE_PLANS:
+        raise ConfigError(f"{name} 必须是 plan100/plan200/plan500")
+    return value.strip()
+
+
+def _custom_targets(
+    value: str | None,
+    allow_custom: bool,
+    fallback_plan: str,
+    fallback_enabled: bool,
+) -> list[CheckinTarget]:
     if value is None or not value.strip():
         return []
     try:
@@ -98,7 +113,7 @@ def _custom_targets(value: str | None, allow_custom: bool) -> list[CheckinTarget
 
     targets = []
     seen_domains = set()
-    for raw_domain, raw_cookies in mapping.items():
+    for raw_domain, raw_config in mapping.items():
         domain = _validated_domain(raw_domain, "CUSTOM_DOMAIN_COOKIES")
         if domain in DEFAULT_DOMAINS:
             raise ConfigError(
@@ -107,20 +122,42 @@ def _custom_targets(value: str | None, allow_custom: bool) -> list[CheckinTarget
         if domain in seen_domains:
             raise ConfigError("CUSTOM_DOMAIN_COOKIES 包含重复域名")
         seen_domains.add(domain)
+        plan = fallback_plan
+        enabled = fallback_enabled
+        if isinstance(raw_config, dict):
+            allowed_fields = {"cookies", "exchange_plan", "enable_exchange"}
+            unknown = set(raw_config) - allowed_fields
+            if unknown:
+                raise ConfigError(
+                    "CUSTOM_DOMAIN_COOKIES 配置对象包含未知字段: "
+                    + ", ".join(sorted(str(item) for item in unknown))
+                )
+            raw_cookies = raw_config.get("cookies")
+            plan = _exchange_plan(
+                raw_config.get("exchange_plan"),
+                fallback_plan,
+                f"CUSTOM_DOMAIN_COOKIES[{domain}].exchange_plan",
+            )
+            raw_enabled = raw_config.get("enable_exchange", fallback_enabled)
+            if not isinstance(raw_enabled, bool):
+                raise ConfigError(
+                    f"CUSTOM_DOMAIN_COOKIES[{domain}].enable_exchange 必须是布尔值"
+                )
+            enabled = raw_enabled
+        else:
+            raw_cookies = raw_config
         if not isinstance(raw_cookies, list) or not raw_cookies:
             raise ConfigError("CUSTOM_DOMAIN_COOKIES 中每个域名必须对应非空 Cookie 列表")
         for cookie in raw_cookies:
             if not isinstance(cookie, str) or not cookie.strip():
                 raise ConfigError("CUSTOM_DOMAIN_COOKIES 中的 Cookie 必须是非空字符串")
-            targets.append(CheckinTarget(domain, cookie.strip()))
+            targets.append(CheckinTarget(domain, cookie.strip(), plan, enabled))
     return targets
 
 
 @dataclass(frozen=True)
 class AppConfig:
     targets: tuple[CheckinTarget, ...]
-    exchange_plan: str
-    enable_exchange: bool
     verbose: bool
     retry_max: int
     retry_backoff: float
@@ -135,6 +172,26 @@ class AppConfig:
     def from_env(cls, environ: Mapping[str, str]) -> "AppConfig":
         glados_cookies = _cookies(environ.get("GLADOS_COOKIES"))
         railgun_cookies = _cookies(environ.get("RAILGUN_COOKIES"))
+        glados_plan = _exchange_plan(
+            environ.get("GLADOS_EXCHANGE_PLAN"),
+            "plan500",
+            "GLADOS_EXCHANGE_PLAN",
+        )
+        glados_enabled = _bool(
+            environ.get("GLADOS_ENABLE_EXCHANGE"),
+            True,
+            "GLADOS_ENABLE_EXCHANGE",
+        )
+        railgun_plan = _exchange_plan(
+            environ.get("RAILGUN_EXCHANGE_PLAN"),
+            glados_plan,
+            "RAILGUN_EXCHANGE_PLAN",
+        )
+        railgun_enabled = _bool(
+            environ.get("RAILGUN_ENABLE_EXCHANGE"),
+            glados_enabled,
+            "RAILGUN_ENABLE_EXCHANGE",
+        )
         allow_custom = _bool(
             environ.get("GLADOS_ALLOW_CUSTOM_DOMAINS"),
             False,
@@ -160,22 +217,37 @@ class AppConfig:
                 raise ConfigError(
                     "旧 GLADOS_DOMAINS=railgun.info 不能与 RAILGUN_COOKIES 同时使用"
                 )
-            targets.extend(CheckinTarget(legacy_domain, item) for item in glados_cookies)
+            legacy_plan, legacy_enabled = (
+                (railgun_plan, railgun_enabled)
+                if legacy_domain == "railgun.info"
+                else (glados_plan, glados_enabled)
+            )
+            targets.extend(
+                CheckinTarget(legacy_domain, item, legacy_plan, legacy_enabled)
+                for item in glados_cookies
+            )
         else:
-            targets.extend(CheckinTarget("glados.cloud", item) for item in glados_cookies)
+            targets.extend(
+                CheckinTarget("glados.cloud", item, glados_plan, glados_enabled)
+                for item in glados_cookies
+            )
 
-        targets.extend(CheckinTarget("railgun.info", item) for item in railgun_cookies)
         targets.extend(
-            _custom_targets(environ.get("CUSTOM_DOMAIN_COOKIES"), allow_custom)
+            CheckinTarget("railgun.info", item, railgun_plan, railgun_enabled)
+            for item in railgun_cookies
+        )
+        targets.extend(
+            _custom_targets(
+                environ.get("CUSTOM_DOMAIN_COOKIES"),
+                allow_custom,
+                glados_plan,
+                glados_enabled,
+            )
         )
         if not targets:
             raise ConfigError(
                 "至少配置 GLADOS_COOKIES、RAILGUN_COOKIES 或 CUSTOM_DOMAIN_COOKIES 之一"
             )
-
-        plan = (environ.get("GLADOS_EXCHANGE_PLAN") or "plan500").strip()
-        if plan not in EXCHANGE_PLANS:
-            raise ConfigError("GLADOS_EXCHANGE_PLAN 必须是 plan100/plan200/plan500")
 
         pushdeer = (environ.get("PUSHDEER_SENDKEY") or "").strip()
         pushplus = (environ.get("PUSHPLUS_TOKEN") or "").strip()
@@ -186,12 +258,6 @@ class AppConfig:
 
         return cls(
             targets=tuple(targets),
-            exchange_plan=plan,
-            enable_exchange=_bool(
-                environ.get("GLADOS_ENABLE_EXCHANGE"),
-                True,
-                "GLADOS_ENABLE_EXCHANGE",
-            ),
             verbose=_bool(environ.get("GLADOS_VERBOSE"), False, "GLADOS_VERBOSE"),
             retry_max=_bounded_int(
                 environ.get("GLADOS_RETRY_MAX"), 2, "GLADOS_RETRY_MAX", 0, 5
@@ -243,14 +309,28 @@ class AppConfig:
         return tuple(channels)
 
     def safe_summary(self) -> dict[str, object]:
-        threshold, days = EXCHANGE_PLANS[self.exchange_plan]
+        policies: dict[tuple[str, str, bool], int] = {}
+        for target in self.targets:
+            key = (target.domain, target.exchange_plan, target.enable_exchange)
+            policies[key] = policies.get(key, 0) + 1
+
+        target_policies = []
+        for (domain, plan, enabled), accounts in policies.items():
+            threshold, days = EXCHANGE_PLANS[plan]
+            target_policies.append(
+                {
+                    "domain": domain,
+                    "accounts": accounts,
+                    "exchange_enabled": enabled,
+                    "exchange_plan": plan,
+                    "exchange_threshold": threshold,
+                    "exchange_days": days,
+                }
+            )
         return {
             "accounts": len(self.targets),
             "domains": self.domains,
-            "exchange_enabled": self.enable_exchange,
-            "exchange_plan": self.exchange_plan,
-            "exchange_threshold": threshold,
-            "exchange_days": days,
+            "target_policies": tuple(target_policies),
             "channels": self.enabled_channels,
             "retry_attempts": self.retry_max + 1,
         }
