@@ -1,85 +1,202 @@
-# Glados自动签到
+# GLaDOS / Railgun 自动签到
 
-## 食用方式：
+[![CI](https://github.com/EinzbernLi/Glados-Railgun-checkin/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/EinzbernLi/Glados-Railgun-checkin/actions/workflows/ci.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
-### 注册一个GLaDOS的账号([注册地址](https://glados.space/landing/0A58E-NV28S-6U3QV-33VMG))
+基于 GitHub Actions 的 GLaDOS / Railgun 多账号自动签到工具。支持积分兑换、失败重试和 PushDeer、PushPlus、Telegram 通知；无需自建服务器。
 
-#### 我的邀请码：([0A58E-NV28S-6U3QV-33VMG](https://0a58e-nv28s-6u3qv-33vmg.glados.space)) 
+- 多账号、多域名与可选积分兑换
+- 默认定时运行，也支持手动 `dry-run` 和 `live`
+- Cookie 域名校验、日志脱敏与有限重试
+- 独立 CI；代码 push 不会触发真实签到
 
-#### 我的优惠码（9折）：([DEVILSTORE](https://0a58e-nv28s-6u3qv-33vmg.glados.space)) 
+> 定时任务默认在每天 UTC 04:00、10:00 运行，对应香港/北京时间 12:00、18:00。GitHub Actions 的计划任务可能延迟，并不保证准点启动。
 
-### **Fork**本仓库
+## 快速开始
 
-![图片加载失败](imgs/1.png)
+### 1. Fork 仓库
 
-### 添加**secret**
+点击 GitHub 页面右上角的 **Fork**，把项目复制到自己的账户。
 
-1. 跳转至自己的仓库的`Settings`->`Secrets and variables`->`Action`
+### 2. 获取 Cookie
 
-2. 添加1个`repository secret`，命名为`GLADOS_COOKIES`，其值对应GLaDOS账号的cookie值中的有效部分（获取方式如下）
+1. 登录 GLaDOS 或 Railgun 并打开签到页面。
+2. 按 **F12** 打开开发者工具，进入 **Network（网络）**。
+3. 刷新页面，选择签到相关请求。
+4. 在 **Request Headers（请求标头）** 中复制完整的 <code>Cookie</code> 值。
 
-- 在GLaDOS的签到页面按`F12`
+<details>
+<summary>查看操作图示</summary>
 
-- 切换到`Network`页面下，刷新
+![Fork 仓库](imgs/1.png)
 
-![图片加载失败](imgs/2.png)
+![查找请求](imgs/2.png)
 
-- 点击第一个选项卡后在`Request Headers`下找到`Cookie`，右键复制cookie的值即可
+</details>
 
-  > 参考格式：koa:sess=eyJ1c2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxAwMH0=; koa:sess.sig=xJkOxxxxxxxxxxxxxxxtnM;
+Cookie 属于敏感凭证。不要把真实值写入代码、Issue、日志或测试。
 
-![图片加载失败](imgs/3.png)
+### 3. 配置 GitHub Secret
 
-- 多账号请在 `COOKIES` 中 添加多个 `cookies` 中间使用 `&`连接即可。（例如： `c1&c3&c3...`）
+进入自己 Fork 后的仓库：
 
-3. 配置积分兑换策略（非必须）
+**Settings → Secrets and variables → Actions → New repository secret**
 
-- 添加1个`repository secret`，命名为`GLADOS_EXCHANGE_PLAN`，配置自动兑换积分策略：
+至少添加：
 
-| 值 | 积分要求 | 兑换天数 |
-|---|---------|---------|
+| Secret | 是否必需 | 内容 |
+|---|---:|---|
+| <code>GLADOS_COOKIES</code> | 是 | 完整 Cookie；多个账号使用 <code>&amp;</code> 连接 |
+| <code>GLADOS_EXCHANGE_PLAN</code> | 否 | <code>plan100</code>、<code>plan200</code> 或 <code>plan500</code>，默认 <code>plan500</code> |
+
+多账号示例：
+
+~~~text
+cookie-account-1&cookie-account-2
+~~~
+
+#### 积分兑换策略
+
+在同一个 **Repository secrets** 页面添加 `GLADOS_EXCHANGE_PLAN`，值只能是下面三种之一：
+
+| 配置值 | 所需积分 | 兑换时长 |
+|---|---:|---:|
 | `plan100` | 100 积分 | 10 天 |
 | `plan200` | 200 积分 | 30 天 |
-| `plan500` | 500 积分 | 100 天 (默认) |
+| `plan500` | 500 积分 | 100 天 |
 
-> 不配置时默认为 `plan500`，即积分达到 500 时自动兑换 100 天
+未配置 `GLADOS_EXCHANGE_PLAN` 时默认使用 `plan500`。程序会在签到后查询积分；只有积分查询成功、积分达到所选策略门槛且兑换功能已启用时，才会调用兑换接口。积分不足时不会兑换。
 
-4. 手机推送（非必须）
+如需完全关闭自动兑换，请进入：
 
-- 添加1个`repository secret`，命名为`PUSHDEER_SENDKEY`，其值对应 PushDeer key: ([获取地址](https://www.pushdeer.com/product.html))。
+**Settings → Secrets and variables → Actions → Variables → New repository variable**
 
-### **star**自己的仓库
+添加变量 `GLADOS_ENABLE_EXCHANGE=false`。需要重新启用时，将它改为 `true` 或删除该变量（默认值为 `true`）。
 
-![图片加载失败](imgs/4.png)
+### 4. 先检查配置，再执行签到
 
-## 文件结构
+1. 打开仓库的 **Actions** 页面并启用 workflows。
+2. 选择 **GLaDOS scheduled check-in**。
+3. 点击 **Run workflow**，保持默认的 <code>dry-run</code> 并运行。
+4. 确认日志显示配置验证通过。
+5. 再选择 <code>live</code>，手动执行一次真实签到。
 
-```shell
-│  checkin.py	# 签到脚本
-│
-├─.github
-│  └─workflows
-│          gladosCheck.yml	# Actions 配置文件
-```
+<code>dry-run</code> 只验证配置并输出脱敏摘要，不会请求签到、兑换或通知服务。普通代码 push 也不会触发真实签到。
 
-## 更新日志
+完成上述步骤后，计划任务会按默认 cron 自动执行 <code>live</code> 签到。
 
-- **2026-01**: 重构代码，添加log输出方便定位，支持新版网址，支持配置积分兑换策略。
-- **2026-04**: 优化代码逻辑，优化日志输出，支持[新版域名](https://railgun.info) ，在 GLADOS_COOKIES 中添加新版域名下的 cookies 即可使用。
+## 通知配置
 
+通知完全可选。可以同时启用多个渠道；其中一个渠道失败不会阻止其他渠道继续发送，但本次任务会返回非零状态。
 
-## 问题排查与定位
-- 大家可以通过查询 actions 中的 running checkin 日志快速定位问题，有其他问题提交issue。
+| Secret | 用途 |
+|---|---|
+| <code>PUSHDEER_SENDKEY</code> | PushDeer SendKey |
+| <code>PUSHPLUS_TOKEN</code> | PushPlus token |
+| <code>TG_BOT_TOKEN</code> | Telegram Bot Token |
+| <code>TG_CHAT_ID</code> | Telegram Chat ID，必须与 Bot Token 同时设置 |
 
-  <img width="1684" height="844" alt="image" src="https://github.com/user-attachments/assets/45348a5f-43e4-45f5-8fdf-ce84d343b30d" />
+完全不配置通知时，签到仍可正常运行。
 
-## 声明
+## 可选配置
 
-本项目不保证稳定运行与更新, 因GitHub相关规定可能会删库, 请注意备份
+以下项目在 **Settings → Secrets and variables → Actions → Variables** 中配置，未填写时使用默认值。
 
+| Variable | 默认值 | 作用 |
+|---|---|---|
+| <code>GLADOS_DOMAINS</code> | <code>glados.cloud,railgun.info</code> | 逗号分隔的签到域名 |
+| <code>GLADOS_ALLOW_CUSTOM_DOMAINS</code> | <code>false</code> | 是否允许自定义域名 |
+| <code>GLADOS_ENABLE_EXCHANGE</code> | <code>true</code> | 是否自动兑换积分 |
+| <code>GLADOS_RETRY_MAX</code> | <code>2</code> | 网络重试次数，允许 0–5 |
+| <code>GLADOS_RETRY_BACKOFF</code> | <code>0.5</code> | 指数退避基数秒数，允许 0–10 |
 
+另外两个仅用于本地运行的可选变量：
 
+| Variable | 默认值 | 作用 |
+|---|---|---|
+| <code>GLADOS_CONNECT_TIMEOUT</code> | <code>5</code> | 连接超时秒数，允许 1–30 |
+| <code>GLADOS_READ_TIMEOUT</code> | <code>15</code> | 读取超时秒数，允许 1–60 |
 
+<code>GLADOS_VERBOSE</code> 为兼容旧版本保留，可作为 Repository Secret 设置为 <code>true</code> 或 <code>false</code>。
 
+### 自定义域名限制
 
+默认只允许 <code>glados.cloud</code> 和 <code>railgun.info</code>。如需使用其他域名，必须同时设置 <code>GLADOS_ALLOW_CUSTOM_DOMAINS=true</code>。自定义值必须是纯 DNS 主机名，不得包含协议、路径、端口、userinfo 或 IP 地址；所有请求始终使用 HTTPS。
 
+## 本地运行
+
+建议使用 Python 3.12：
+
+~~~powershell
+python -m pip install -r requirements.txt
+$env:GLADOS_COOKIES = "your-cookie"
+python checkin.py
+~~~
+
+只检查配置：
+
+~~~powershell
+$env:GLADOS_COOKIES = "fake-cookie-a&fake-cookie-b"
+$env:PUSHPLUS_TOKEN = "fake-token"
+python checkin.py --dry-run
+~~~
+
+退出码：
+
+- <code>0</code>：签到与已配置通知全部成功，或账号今日已经签到。
+- <code>1</code>：至少一个签到或通知任务失败。
+- <code>2</code>：配置错误，尚未发起网络请求。
+
+## 安全设计
+
+- Cookie 只发送到经过校验的 HTTPS 签到域名。
+- 通知服务不会收到 Cookie。
+- 日志、异常摘要和 <code>--dry-run</code> 不输出 Cookie、token、SendKey 或 Chat ID。
+- CI 不读取 Secrets，也不执行真实签到、兑换或通知。
+- GitHub Actions 使用只读仓库权限，并将官方 Actions 固定到完整 commit SHA。
+- 连接错误、超时、429 和部分 5xx 状态会有限重试；认证错误和普通 4xx 不重试。
+
+## 开发与测试
+
+~~~powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+python -m compileall -q src tests checkin.py
+~~~
+
+测试使用虚假凭证和注入的 HTTP 边界，不访问真实签到、兑换或通知服务。
+
+项目结构：
+
+~~~text
+checkin.py                         兼容旧用法的命令行入口
+src/                               配置、API、签到、通知与渲染模块
+tests/                             单元测试与 workflow 约束测试
+.github/workflows/ci.yml           无 Secrets 的持续集成
+.github/workflows/gladosCheck.yml  定时与手动签到
+~~~
+
+## 常见问题
+
+### 定时任务为什么没有准点运行？
+
+GitHub 不保证 scheduled workflow 准点执行，高峰期可能延迟。先检查 Actions 是否已在 Fork 中启用，以及仓库是否长期没有活动。
+
+### “今日已签到”算失败吗？
+
+不算。这是正常结果，程序返回成功。
+
+### 积分不足会尝试兑换吗？
+
+不会。只有积分查询成功、兑换已启用并达到所选计划门槛时才调用兑换接口。
+
+### 如何停止自动签到？
+
+在仓库 **Actions** 页面禁用 **GLaDOS scheduled check-in** workflow，或删除自己的 Fork。删除 Secret 并不能阻止 workflow 启动，只会让配置检查失败。
+
+## 许可证与来源
+
+本项目按 [GNU GPL-3.0](LICENSE) 发布，源自
+[Devilstore/Glados-Railgun-checkin](https://github.com/Devilstore/Glados-Railgun-checkin)。本 Fork 的详细来源与第三方说明见 [NOTICE](NOTICE)。
+
+本工具不保证第三方服务长期可用。请遵守相关服务条款，并自行承担使用自动化脚本的风险。

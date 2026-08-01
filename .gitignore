@@ -24,3 +24,11 @@ logs
 build/
 dist/
 *.egg-info/
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# Local agent workflow state
+.comet/
+docs/comet/
